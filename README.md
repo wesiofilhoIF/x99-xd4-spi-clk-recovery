@@ -6,12 +6,13 @@ Guia técnico de engenharia reversa, diagnóstico de bancada e firmware para mic
 
 ## 📌 Sumário
 1. [O Problema e o Erro das Análises Anteriores](#1-o-problema-e-o-erro-das-análises-anteriores)
-2. [Mapeamento Físico em Zoom Macro (300%)](#2-mapeamento-físico-em-zoom-macro-300)
-3. [Por que a Emulação Clockless ou Sem Contato é Impossível](#3-por-que-a-emulação-clockless-ou-sem-contato-é-impossível)
-4. [Firmware Testador de Bancada com ESP32](#4-firmware-testador-de-bancada-com-esp32)
-5. [Como Flashear os Binários Pré-Compilados (.bin)](#5-como-flashear-os-binários-pré-compilados-bin)
-6. [O Procedimento de Solda do Jumper](#6-o-procedimento-de-solda-do-jumper)
-7. [Pinagem RomEMU (DatanoiseTV)](#7-pinagem-romemu-datanoisetv)
+2. [O SMD Correto Confirmado em Bancada](#2-o-smd-correto-confirmado-em-bancada)
+3. [Mapeamento Físico em Zoom Macro (300%)](#3-mapeamento-físico-em-zoom-macro-300)
+4. [Por que a Emulação Clockless ou Sem Contato é Impossível](#4-por-que-a-emulação-clockless-ou-sem-contato-é-impossível)
+5. [Firmware Testador de Bancada com ESP32](#5-firmware-testador-de-bancada-com-esp32)
+6. [Como Flashear os Binários Pré-Compilados (.bin)](#6-como-flashear-os-binários-pré-compilados-bin)
+7. [O Procedimento de Solda do Jumper](#7-o-procedimento-de-solda-do-jumper)
+8. [Pinagem RomEMU (DatanoiseTV)](#8-pinagem-romemu-datanoisetv)
 
 ---
 
@@ -25,7 +26,31 @@ Modelos de IA anteriores (ChatGPT, Hermes) falharam na identificação por dois 
 
 ---
 
-## 2. Mapeamento Físico em Zoom Macro (300%)
+## 2. O SMD Correto Confirmado em Bancada
+
+Na sessão de bancada com medição ativa de ADC e injeção de 3.3V, o componente exato circulado em vermelho pelo usuário foi diagnosticado terminal a terminal:
+
+![SMD Correto Zoom](docs/smd_correto_zoom.png)
+
+```
+[LADO DO CHIPSET C612]                                [LADO DA BIOS]
+       (Direita)                                         (Esquerda)
+           |                                                 |
+     🟠 LARANJA                                          🔵 AZUL
+   (~0.8V a 2.4V)                                      (0.00 V / Aberto)
+           |                                                 |
+           +-----[ RESISTOR PRETO 0402 (15-33 Ω) ]-----------+---- (Trilha Rompida) ---X (Pino 6 Arrancado)
+           |
+   ★ SOLDE O FIO AQUI ★
+```
+
+* **Terminal Esquerdo (Lado da BIOS):** Retornou **0.00 V / AZUL** (circuito 100% aberto — confirmando que este terminal era o que ligava no pad 6 arrancado).
+* **Terminal Direito (Lado do PCH / Dissipador):** Retornou **~0.8V a 2.4V / LARANJA** (sinal de clock vivo que vem direto da esfera BGA do chipset Intel C612).
+* **Ponto de Solda:** Solde o fio de micro-solda (AWG 30) diretamente no **Terminal Direito (Lado Laranja)**.
+
+---
+
+## 3. Mapeamento Físico em Zoom Macro (300%)
 
 ![Mapeamento Macro BIOS](docs/mapeamento_macro_bios.png)
 
@@ -36,14 +61,9 @@ Modelos de IA anteriores (ChatGPT, Hermes) falharam na identificação por dois 
 * **Corredor Alvo — Grupo A (Caixa Verde):** Coluna vertical de **exatamente 6 resistores pretos SMD 0402** colada à direita dos pads da BIOS.
 * **Grade do Chipset (Caixa Vermelha — IGNORAR):** 35 capacitores MLCC bege/marrons.
 
-### O Resistor do SPI_CLK:
-O resistor de amortecimento do `SPI_CLK` é o **terceiro resistor da coluna verde (de cima para baixo)**:
-* **Terminal Esquerdo (Lado da BIOS):** Retorna `0.00 V / AZUL` (circuito aberto — trilha que ia para o pad rompido).
-* **Terminal Direito (Lado do Chipset PCH):** Retorna `~0.8V a 2.4V / LARANJA` (sinal vivo do clock vindo da esfera BGA do Intel C612).
-
 ---
 
-## 3. Por que a Emulação Clockless ou Sem Contato é Impossível
+## 4. Por que a Emulação Clockless ou Sem Contato é Impossível
 
 1. **Intel C612 é estritamente SPI Master:** O chipset gera trens de pulsos sob demanda e amostra a linha `MISO` usando internamente esse mesmo clock. Ele não possui circuito de *Clock-Data Recovery* (CDR).
 2. **Assincronia Fatal de Cristais:** A deriva térmica entre o cristal da placa (25 MHz) e o do microcontrolador (40 MHz) causa perda de fase em menos de $20\ \mu\text{s}$, corrompendo a leitura da BIOS com código POST `00` ou `FF`.
@@ -51,7 +71,7 @@ O resistor de amortecimento do `SPI_CLK` é o **terceiro resistor da coluna verd
 
 ---
 
-## 4. Firmware Testador de Bancada com ESP32
+## 5. Firmware Testador de Bancada com ESP32
 
 O firmware utiliza injeção ativa de 3.3V com leitura por conversor analógico-digital (ADC puro de alta impedância) com média de 16 amostragens para rejeitar ruídos eletrostáticos e fugas de silício:
 
@@ -88,7 +108,7 @@ void loop() {
 
 ---
 
-## 5. Como Flashear os Binários Pré-Compilados (.bin)
+## 6. Como Flashear os Binários Pré-Compilados (.bin)
 
 Os binários compilados já estão gerados no repositório na pasta `binaries/`:
 
@@ -109,17 +129,17 @@ esptool --chip esp32 --port COM8 --baud 921600 write_flash 0x1000 binaries/esp32
 
 ---
 
-## 6. O Procedimento de Solda do Jumper
+## 7. O Procedimento de Solda do Jumper
 
 1. Utilizar fio de cobre esmaltado fino (**AWG 30 ou AWG 32**).
-2. Soldar uma das pontas no **Terminal Direito (Lado Laranja / voltado para o PCH)** do terceiro resistor da coluna de 6 SMDs.
+2. Soldar uma das pontas no **Terminal Direito (Lado Laranja / voltado para o PCH)** do resistor identificado na Seção 2.
 3. Contornar o fio por baixo do chip da BIOS para não sofrer indução eletromagnética de alta frequência dos pinos de dados.
 4. Soldar a outra ponta diretamente na **perna 6 do chip SOP-8 (W25Q128FV)** ou no **GPIO 12 do ESP32-S3**.
 5. Aplicar uma gotícula de máscara UV (Solder Mask UV) e curar com luz ultravioleta por 60 segundos para fixar mecanicamente o jumper.
 
 ---
 
-## 7. Pinagem RomEMU (DatanoiseTV)
+## 8. Pinagem RomEMU (DatanoiseTV)
 
 Caso a placa utilize o emulador de BIOS de hardware **RomEMU** em vez do chip físico:
 
